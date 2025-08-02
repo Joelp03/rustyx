@@ -1,23 +1,41 @@
 use std::{ net::SocketAddr};
 
+use futures::future::BoxFuture;
 use http_body_util::{BodyExt, Full, combinators::BoxBody};
 use hyper::{
-    Method, Request, Response, Uri,
-    body::{Bytes, Incoming},
-    header::{HeaderValue, SERVER},
-    upgrade::Upgraded,
+    body::{Bytes, Incoming}, header::{HeaderValue, SERVER}, service::Service, upgrade::Upgraded, Method, Request, Response, Uri
 };
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpStream;
 
-use crate::http::request::{empty};
+use crate::http::request::{empty, ProxyRequest};
 
 
 type ClientBuilder = hyper::client::conn::http1::Builder;
 
+
+pub struct ProxyService {
+    pub client_addr: SocketAddr,
+}
+
+impl Service<Request<Incoming>> for ProxyService {
+    type Error = hyper::Error;
+    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+    type Response = Response<BoxBody<Bytes, hyper::Error>>;
+
+    fn call(&self, req: Request<Incoming>) -> Self::Future {
+        Box::pin(
+            proxy(
+            req,
+            self.client_addr,
+        )
+    )
+    }
+}
+
 pub async fn proxy(
     req: Request<Incoming>,
-    from: SocketAddr,
+    client_addr: SocketAddr,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     //println!("req: {:?}", req);
 
@@ -67,11 +85,11 @@ pub async fn proxy(
         });
 
         let mut req = req;
-        let from_port = from.port().to_string();
-        let from_ip = from.ip().to_string();
+        let from_port = client_addr.port().to_string();
+        let from_ip = client_addr.ip().to_string();
         println!("client");
         println!("from port: {}, from ip: {}", from_port, from_ip);
-        println!("from: {}", from);
+        println!("from: {}", client_addr);
         req.headers_mut()
             .insert("X-Forwarded-For", HeaderValue::from_str(&from_ip).unwrap());
         req.headers_mut().insert(

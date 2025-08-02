@@ -1,7 +1,8 @@
 use std::net::SocketAddr;
 
 use http_body_util::{BodyExt, Empty, combinators::BoxBody};
-use hyper::{ Request, body::Bytes};
+use hyper::{ body::{Bytes },  Request};
+
 
 pub struct ProxyRequest<T> {
     req: Request<T>,
@@ -53,6 +54,7 @@ impl<T> ProxyRequest<T> {
          }
     }
 }
+
 
 // --- Sección de pruebas ---
 #[cfg(test)]
