@@ -3,7 +3,7 @@ use std::{ net::SocketAddr};
 use futures::future::BoxFuture;
 use http_body_util::{BodyExt, Full, combinators::BoxBody};
 use hyper::{
-    body::{Bytes, Incoming}, header::{HeaderValue, SERVER}, service::Service, upgrade::Upgraded, Method, Request, Response, Uri
+    body::{Bytes, Incoming}, header::{self, HeaderValue}, service::Service, upgrade::Upgraded, Method, Request, Response, Uri
 };
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpStream;
@@ -16,6 +16,7 @@ type ClientBuilder = hyper::client::conn::http1::Builder;
 
 pub struct ProxyService {
     pub client_addr: SocketAddr,
+    pub proxy_addr: SocketAddr,
 }
 
 impl Service<Request<Incoming>> for ProxyService {
@@ -26,23 +27,21 @@ impl Service<Request<Incoming>> for ProxyService {
     fn call(&self, req: Request<Incoming>) -> Self::Future {
         Box::pin(
             proxy(
-            req,
-            self.client_addr,
+            ProxyRequest::new(req, self.client_addr, self.proxy_addr),
         )
     )
     }
 }
 
 pub async fn proxy(
-    req: Request<Incoming>,
-    client_addr: SocketAddr,
+    req: ProxyRequest<Incoming>,
 ) -> Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error> {
     //println!("req: {:?}", req);
 
-    if Method::CONNECT == req.method() {
-        if let Some(addr) = host_addr(req.uri()) {
+    if Method::CONNECT == req.request.method() {
+        if let Some(addr) = host_addr(req.request.uri()) {
             tokio::task::spawn(async move {
-                match hyper::upgrade::on(req).await {
+                match hyper::upgrade::on(req.request).await {
                     Ok(upgraded) => {
                         if let Err(e) = tunnel(upgraded, addr).await {
                             eprintln!("server io error: {}", e);
@@ -54,7 +53,7 @@ pub async fn proxy(
 
             Ok(Response::new(empty()))
         } else {
-            eprintln!("CONNECT host is not socket addr: {:?}", req.uri());
+            eprintln!("CONNECT host is not socket addr: {:?}", req.request.uri());
             let resp = Response::new(full("CONNECT must be to a socket address"));
 
             //*resp.status_mut() = http::StatusCode::BAD_REQUEST;
@@ -62,7 +61,6 @@ pub async fn proxy(
             Ok(resp)
         }
     } else {
-        println!("ELSE TO PROXY");
         // Parse our URL...
         let url = "http://localhost:9000/hello".parse::<hyper::Uri>().unwrap();
 
@@ -84,24 +82,10 @@ pub async fn proxy(
             }
         });
 
-        let mut req = req;
-        let from_port = client_addr.port().to_string();
-        let from_ip = client_addr.ip().to_string();
-        println!("client");
-        println!("from port: {}, from ip: {}", from_port, from_ip);
-        println!("from: {}", client_addr);
-        req.headers_mut()
-            .insert("X-Forwarded-For", HeaderValue::from_str(&from_ip).unwrap());
-        req.headers_mut().insert(
-            "X-Forwarded-Port",
-            HeaderValue::from_str(&from_port).unwrap(),
-        );
-        req.headers_mut()
-            .insert("X-Forwarded-Proto", HeaderValue::from_static("http"));
-        let mut resp = sender.send_request(req).await?;
+        let mut resp = sender.send_request(req.forwarded_headers()).await?;
 
         resp.headers_mut()
-            .insert(SERVER, HeaderValue::from_static("Rustyx"));
+            .insert(header::SERVER, HeaderValue::from_static("Rustyx"));
 
         Ok(resp.map(|b| b.boxed()))
     }

@@ -1,12 +1,13 @@
 use std::net::SocketAddr;
 
 use http_body_util::{BodyExt, Empty, combinators::BoxBody};
-use hyper::{ body::{Bytes },  Request};
+use hyper::{ body::Bytes, header::{self, HeaderValue}, Request};
 
 
 pub struct ProxyRequest<T> {
-    req: Request<T>,
-    client_addr: SocketAddr,
+    pub request: Request<T>,
+    pub client_addr: SocketAddr,
+    pub proxy_addr: SocketAddr,
 }
 pub fn empty() -> BoxBody<Bytes, hyper::Error> {
         Empty::<Bytes>::new()
@@ -14,45 +15,43 @@ pub fn empty() -> BoxBody<Bytes, hyper::Error> {
             .boxed()
 }
 
-// proxy_set_header   X-Forwarded-For $proxy_add_x_forwarded_for;
-// → Adds the original client IP address to the `X-Forwarded-For` header.
-//   Useful for identifying the real IP of the user when the request is going through a proxy or load balancer.
-
-// proxy_set_header   X-Forwarded-Host $host;
-// → Sets the `X-Forwarded-Host` header to the original `Host` header sent by the client.
-//   Helps the backend server know what domain was originally requested (e.g., example.com).
-
-// proxy_set_header   X-Forwarded-Port $server_port;
-// → Sets the `X-Forwarded-Port` header to the port on which the request was received by the proxy (e.g., 80 or 443).
-//   Useful for backend services that need to know the original port used by the client.
-
-// proxy_set_header   X-Forwarded-Proto $scheme;
-// → Sets the `X-Forwarded-Proto` header to the original protocol (`http` or `https`) used by the client.
-//   This tells the backend whether the original request was encrypted (HTTPS) or not.
-// example of headers added by nginx
-//   host: 'localhost',
-//   'x-forwarded-for': '192.00.00.00',
-//   'x-forwarded-port': '24892',
-//   'x-forwarded-proto': 'http',
-
 
 impl<T> ProxyRequest<T> {
 
-    pub fn new(req: Request<T>, client_addr: SocketAddr) -> Self {
-        let mut req = req;
-        
-
-        let client_ip =  client_addr.ip().to_string().parse().unwrap();
-        req.headers_mut().insert("x-forwarded-for", client_ip);
-        req.headers_mut().insert("x-forwarded-proto", "http".parse().unwrap());
-        req.headers_mut().insert("x-forwarded-port", client_addr.port().to_string().parse().unwrap());
-
-
-        Self { 
-            req, 
-            client_addr
-         }
+    pub fn new(req: Request<T>, client_addr: SocketAddr, proxy_addr: SocketAddr) -> Self {
+        Self { request: req, client_addr, proxy_addr}
     }
+
+    /// Set the standard headers for the request to indicate that it is a forwarded request from another host.
+    ///
+    /// Adds the following headers:
+    /// - `x-forwarded-for`: The IP of the client making the request.
+    /// - `x-forwarded-port`: The port on which the request was received.
+    /// - `x-forwarded-proto`: The protocol of the request (`http` or `https`).
+    /// - `host`: The original host that the request was sent to, if it can be determined.
+    ///
+    /// These headers are useful for identifying the original client and the host that the request was sent to,
+    /// even if the request goes through a proxy or load balancer.
+    ///
+    pub fn forwarded_headers(mut self)->Request<T> {
+        let ip = self.client_addr.ip().to_string();
+        let port = self.client_addr.port().to_string();
+        let by = self.proxy_addr.to_string();
+
+        let host = self.request.uri().host().map(|h| h.to_string()).unwrap_or_else(|| self.proxy_addr.ip().to_string()); 
+
+        self.request.headers_mut().insert("x-forwarded-for", HeaderValue::from_str(&ip).unwrap());
+        self.request.headers_mut().insert("x-forwarded-port", HeaderValue::from_str(&port).unwrap());
+        self.request.headers_mut().insert("x-forwarded-proto", HeaderValue::from_static("http"));
+
+        let forwarded_value = format!("by={};for={}; proto=http; host={}",by, ip, host);
+        self.request.headers_mut().insert("forwarded", HeaderValue::from_str(&forwarded_value).unwrap());
+ 
+        self.request.headers_mut().insert(header::HOST,HeaderValue::from_str(&host).unwrap());
+       
+
+        return self.request
+    } 
 }
 
 
@@ -60,34 +59,50 @@ impl<T> ProxyRequest<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use hyper::Uri;
-    use hyper::header::HeaderValue;
+    use hyper::{header::HeaderValue, };
 
 
 
-    fn create_dummy_request() -> Request<BoxBody<Bytes, hyper::Error>> {
+    fn create_dummy_request(proxy_uri: SocketAddr) -> Request<BoxBody<Bytes, hyper::Error>> {
+        let uri =  proxy_uri.to_string();
+        let uri_format = format!("http://{uri}");
+
         return Request::builder()
-            .uri(Uri::from_static("http://127.0.0.1:8080"))
+            .uri(uri_format)
             .body(empty())
             .unwrap();
     }
 
     #[test]
-    fn new_proxy_request_adds_correct_headers() {
+    fn proxy_request_adds_correct_headers() {
         // 1. Arrange: Set up the necessary data for the test
-        let client_addr = SocketAddr::from(([127, 0, 0, 1], 8100));
+        let client_addr = SocketAddr::from(([127, 0, 0, 1], 5000));
+        let proxy_addr = SocketAddr::from(([127, 0, 0, 1], 8080));
 
-        let dummy_request = create_dummy_request();
+
+        let dummy_request = create_dummy_request(proxy_addr);
 
         // 2. Act: Call the method you want to test
-        let proxy_req = ProxyRequest::new(dummy_request, client_addr);
+        let proxy_req = ProxyRequest::new(dummy_request, client_addr, proxy_addr);
 
-        let headers = proxy_req.req.headers();
+        //let headers = proxy_req.request.headers();
+        let forwarded_req = proxy_req.forwarded_headers();
+        let headers = forwarded_req.headers();
+
+        let by = proxy_addr.to_string();
+        let _for = client_addr.ip().to_string();
+        let host = proxy_addr.ip().to_string();
+
+        let expect_forward = format!("by={};for={}; proto={}; host={}", by, _for, "http", host);
+    
+        println!("expected {}", expect_forward);
 
         // // Verify the values of the headers
         assert_eq!(headers["x-forwarded-for"], HeaderValue::from_static("127.0.0.1"));
         assert_eq!(headers["x-forwarded-proto"], HeaderValue::from_static("http"));
-        assert_eq!(headers["x-forwarded-port"], HeaderValue::from_static("8100"));
+        assert_eq!(headers["x-forwarded-port"], HeaderValue::from_static("5000"));
+        assert_eq!(headers[header::FORWARDED], HeaderValue::from_str(&expect_forward).unwrap())
+
     }
 }
 

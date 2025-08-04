@@ -15,7 +15,9 @@ pub async fn start() -> Result<(), Box<dyn std::error::Error>> {
 
     loop {
         let (stream, client_addr) = listener.accept().await?;
+        let proxy_addr = stream.local_addr()?;
         let io = TokioIo::new(stream);
+
 
         tokio::task::spawn(async move {
             if let Err(err) = ServerBuilder::new()
@@ -23,6 +25,7 @@ pub async fn start() -> Result<(), Box<dyn std::error::Error>> {
                 .title_case_headers(true)
                 .serve_connection(io, ProxyService { 
                     client_addr,
+                    proxy_addr
                 })
                 .with_upgrades()
                 .await
