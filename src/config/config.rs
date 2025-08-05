@@ -2,33 +2,27 @@ use std::{fs, net::SocketAddr, str::FromStr};
 
 use serde::Deserialize;
 
-#[derive(Debug, Deserialize)]
-pub struct Config {
-    pub listener: Listener,
-    pub servers: Servers,
-}
 
 #[derive(Debug, Deserialize)]
-pub struct Listener {
-    pub listen: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Location {
-    path: String,
-    proxy_pass: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Servers {
-    locations: Vec<Location>,
-}
-
-
 pub struct ProxyConfig {
-    pub listener: SocketAddr,
-    servers: Servers,
+    #[serde(rename = "server")]
+    pub servers: Vec<Server>,
 }
+
+// server config
+#[derive(Debug, Deserialize, Clone)]
+pub struct Server{
+    pub listen: Vec<SocketAddr>,
+    pub name: String,
+    pub location: Vec<Location>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct Location {
+    pub path: String,
+    pub proxy_pass: String,
+}
+
 
 
 pub fn load_config() -> Result<ProxyConfig, Box<dyn std::error::Error>> {
@@ -36,12 +30,8 @@ pub fn load_config() -> Result<ProxyConfig, Box<dyn std::error::Error>> {
 
     let contents = fs::read_to_string(filename)?;
 
-    let config: Config = toml::from_str(&contents)?;
-    
-        
-    let listener = SocketAddr::from_str(&config.listener.listen)
-        .map_err(|e| format!("Failed to parse listen address: {}", e))?;
+    let config: ProxyConfig = toml::from_str(&contents)?;
     
 
-    Ok(ProxyConfig { listener, servers: config.servers })
+    Ok(config)
 }

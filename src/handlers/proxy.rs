@@ -1,18 +1,22 @@
-use std::{ net::SocketAddr};
+use std::{net::SocketAddr};
 
 use futures::future::BoxFuture;
 use http_body_util::{BodyExt, Full, combinators::BoxBody};
 use hyper::{
-    body::{Bytes, Incoming}, header::{self, HeaderValue}, service::Service, upgrade::Upgraded, Method, Request, Response, Uri
+    Method, Request, Response, Uri,
+    body::{Bytes, Incoming},
+    header::{self, HeaderValue},
+    service::Service,
+    upgrade::Upgraded,
 };
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpStream;
 
-use crate::http::request::{empty, ProxyRequest};
-
+use crate::{
+    http::request::{ProxyRequest, empty},
+};
 
 type ClientBuilder = hyper::client::conn::http1::Builder;
-
 
 pub struct ProxyService {
     pub client_addr: SocketAddr,
@@ -25,11 +29,8 @@ impl Service<Request<Incoming>> for ProxyService {
     type Response = Response<BoxBody<Bytes, hyper::Error>>;
 
     fn call(&self, req: Request<Incoming>) -> Self::Future {
-        Box::pin(
-            proxy(
-            ProxyRequest::new(req, self.client_addr, self.proxy_addr),
-        )
-    )
+        let request = ProxyRequest::new(req, self.client_addr, self.proxy_addr);
+        Box::pin(proxy(request))
     }
 }
 
@@ -55,9 +56,7 @@ pub async fn proxy(
         } else {
             eprintln!("CONNECT host is not socket addr: {:?}", req.request.uri());
             let resp = Response::new(full("CONNECT must be to a socket address"));
-
             //*resp.status_mut() = http::StatusCode::BAD_REQUEST;
-
             Ok(resp)
         }
     } else {
@@ -82,6 +81,7 @@ pub async fn proxy(
             }
         });
 
+        // send request to server by proxy
         let mut resp = sender.send_request(req.forwarded_headers()).await?;
 
         resp.headers_mut()
@@ -91,12 +91,9 @@ pub async fn proxy(
     }
 }
 
-
-
 fn host_addr(uri: &Uri) -> Option<String> {
     uri.authority().map(|auth| auth.to_string())
 }
-
 
 fn full<T: Into<Bytes>>(chunk: T) -> BoxBody<Bytes, hyper::Error> {
     Full::new(chunk.into())
@@ -123,4 +120,3 @@ async fn tunnel(upgraded: Upgraded, addr: String) -> std::io::Result<()> {
 
     Ok(())
 }
-

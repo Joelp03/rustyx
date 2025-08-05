@@ -65,7 +65,7 @@ mod tests {
 
     fn create_dummy_request(proxy_uri: SocketAddr) -> Request<BoxBody<Bytes, hyper::Error>> {
         let uri =  proxy_uri.to_string();
-        let uri_format = format!("http://{uri}");
+        let uri_format = format!("http://{}", uri);
 
         return Request::builder()
             .uri(uri_format)

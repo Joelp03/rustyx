@@ -1,15 +1,12 @@
+# Primer servidor
+[[server]]
+listen = ["127.0.0.1:8000"]
+name = "localhost"
 
-title = "Rustyx Configuration File"
+[[server.location]]
+path = "/"
+proxy_pass = "http://127.0.0.1:3000"
 
-[listener]
-listen = "127.0.0.1:3000"
-
-[servers]
-
-[[servers.locations]]
-path = "/v1/"
-proxy_pass = "127.0.0.1:9000"
-
-[[servers.locations]]
-path = "/v2/"
-proxy_pass = "127.0.0.1:9001"
+[[server.location]]
+path = "/api/"
+proxy_pass = "http://127.0.0.1:3001/"
