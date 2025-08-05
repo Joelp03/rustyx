@@ -8,5 +8,6 @@ mod http;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    rustyx::start().await
+   let master =  rustyx::Master::new();
+   master.start().await
 }

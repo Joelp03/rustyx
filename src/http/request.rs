@@ -45,13 +45,15 @@ impl<T> ProxyRequest<T> {
         self.request.headers_mut().insert("x-forwarded-proto", HeaderValue::from_static("http"));
 
         let forwarded_value = format!("by={};for={}; proto=http; host={}",by, ip, host);
-        self.request.headers_mut().insert("forwarded", HeaderValue::from_str(&forwarded_value).unwrap());
+        self.request.headers_mut().insert(header::FORWARDED, HeaderValue::from_str(&forwarded_value).unwrap());
  
         self.request.headers_mut().insert(header::HOST,HeaderValue::from_str(&host).unwrap());
        
 
-        return self.request
+        self.request
     } 
+
+   
 }
 
 
@@ -95,7 +97,6 @@ mod tests {
 
         let expect_forward = format!("by={};for={}; proto={}; host={}", by, _for, "http", host);
     
-        println!("expected {}", expect_forward);
 
         // // Verify the values of the headers
         assert_eq!(headers["x-forwarded-for"], HeaderValue::from_static("127.0.0.1"));

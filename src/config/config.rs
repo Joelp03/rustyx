@@ -1,4 +1,4 @@
-use std::{fs, net::SocketAddr, str::FromStr};
+use std::{fs, net::SocketAddr };
 
 use serde::Deserialize;
 
@@ -14,13 +14,14 @@ pub struct ProxyConfig {
 pub struct Server{
     pub listen: Vec<SocketAddr>,
     pub name: String,
-    pub location: Vec<Location>,
+    #[serde(rename = "location")]
+    pub locations: Vec<Location>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct Location {
     pub path: String,
-    pub proxy_pass: String,
+    pub proxy_pass: SocketAddr,
 }
 
 

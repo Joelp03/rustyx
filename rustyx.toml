@@ -5,8 +5,8 @@ name = "localhost"
 
 [[server.location]]
 path = "/"
-proxy_pass = "http://127.0.0.1:3000"
+proxy_pass = "127.0.0.1:9000"
 
 [[server.location]]
-path = "/api/"
-proxy_pass = "http://127.0.0.1:3001/"
+path = "/api"
+proxy_pass = "127.0.0.1:9001"
