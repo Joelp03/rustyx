@@ -1,17 +1,16 @@
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, sync::Arc, time::Duration};
 
-use crate::{
-    config::{config::{load_config, Server}},
-    handlers::proxy::ProxyService,
-};
-use hyper_util::rt::TokioIo;
+use crate::config::config::{Server, load_config};
+use crate::handlers::proxy::ProxyService;
+
+use hyper_util::{rt::TokioIo, server::graceful::GracefulShutdown};
 use tokio::net::TcpListener;
+use tokio::signal;
+use tokio::task::JoinSet;
 
 type ServerBuilder = hyper::server::conn::http1::Builder;
 
-pub struct Master {
-    
-}
+pub struct Master;
 
 impl Master {
     pub fn new() -> Self {
@@ -21,13 +20,12 @@ impl Master {
     pub async fn start(&self) -> Result<(), Box<dyn std::error::Error>> {
         let config = load_config()?;
 
-        let mut tasks = tokio::task::JoinSet::new();
-
+        let mut tasks = JoinSet::new();
+ 
         for server in config.servers {
-            let config_server = Arc::new(server); 
+            let config_server = Arc::new(server);
             for listen_addr in config_server.listen.clone() {
-
-                tasks.spawn(Self::create_task(config_server.clone(), listen_addr));
+                tasks.spawn(Self::create_server(config_server.clone(), listen_addr));
             }
         }
 
@@ -35,40 +33,73 @@ impl Master {
         Ok(())
     }
 
-    async fn create_task(
+    async fn shutdown_signal() {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install CTRL+C handler");
+        eprintln!("Shutdown signal received");
+    }
+
+    async fn create_server(
         server: Arc<Server>,
         listen_addr: SocketAddr,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let listener = TcpListener::bind(listen_addr).await?;
         println!("Proxy {} listening on http://{}", server.name, listen_addr);
 
+        let graceful = GracefulShutdown::new();
+        let mut shutdown_signal = Box::pin(Self::shutdown_signal());
+
         loop {
-            let (stream, client_addr) = listener.accept().await?;
-            let proxy_addr = stream.local_addr()?;
-            let io = TokioIo::new(stream);
+            tokio::select! {
+                Ok((stream, client_addr)) = listener.accept() => {
+                    let proxy_addr = stream.local_addr()?;
+                    let io = TokioIo::new(stream);
 
-            let config_server = server.clone();
+                    println!("accepted connection from {:?}", client_addr);
 
-            println!("accepted connection from {:?}", client_addr);
+                    let config_server = server.clone();
+                    let graceful_conn = graceful.watch(
+                        ServerBuilder::new()
+                            .preserve_header_case(true)
+                            .title_case_headers(true)
+                            .serve_connection(
+                                io,
+                                ProxyService {
+                                    client_addr,
+                                    proxy_addr,
+                                    config_server,
+                                },
+                            )
+                    );
 
-            tokio::task::spawn(async move {
-                if let Err(err) = ServerBuilder::new()
-                    .preserve_header_case(true)
-                    .title_case_headers(true)
-                    .serve_connection(
-                        io,
-                        ProxyService {
-                            client_addr,
-                            proxy_addr,
-                            config_server 
-                        },
-                    )
-                    .with_upgrades()
-                    .await
-                {
-                    println!("Failed to serve connection: {:?}", err);
+                    tokio::spawn(async move {
+                        if let Err(err) = graceful_conn.await {
+                            eprintln!("Failed to serve connection: {:?}", err);
+                        }
+                    });
+                },
+
+                _ = &mut shutdown_signal => {
+                    drop(listener);
+                    eprintln!("Gracefully shutting down {}", server.name);
+                    break;
                 }
-            });
+            }
         }
+
+        const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+        // waiting connections
+        tokio::select! {
+            _ = graceful.shutdown() => {
+                eprintln!("All connections on {} closed", listen_addr);
+            },
+            
+            _ = tokio::time::sleep(SHUTDOWN_TIMEOUT) => {
+                eprintln!("Graceful shutdown timeout on {}", listen_addr);
+            }
+        }
+
+        Ok(())
     }
 }

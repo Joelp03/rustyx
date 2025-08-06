@@ -6,6 +6,7 @@ Rustyx is a minimal reverse proxy written in Rust, inspired by NGINX. It routes 
 
 - **Multi-server configuration**: Support for multiple proxy servers with different listening addresses
 - **Path-based routing**: Route requests to different backend servers based on URL paths
+- **Graceful Shutdown**:  Support for a "graceful shutdown" signal.
 - **HTTP/HTTPS tunneling**: Full support for CONNECT method and SSL tunneling
 - **Async architecture**: Built on Tokio for high concurrency and performance
 - **Header preservation**: Maintains original header casing and formatting
