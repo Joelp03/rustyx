@@ -1,12 +1,15 @@
-# Primer servidor
 [[server]]
 listen = ["127.0.0.1:8000"]
 name = "localhost"
 
-[[server.location]]
-path = "/"
-proxy_pass = "127.0.0.1:9000"
+
 
 [[server.location]]
 path = "/api"
 proxy_pass = "127.0.0.1:9001"
+
+
+# static file
+[[server.location]]
+path = "/"
+root = "/home/joel/Documents/Development/projects/Rustyx/static"

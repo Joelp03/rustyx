@@ -32,7 +32,8 @@ mod tests {
     use http_body_util::combinators::BoxBody;
     use hyper::body::Bytes;
 
-    use crate::http::request::empty;
+
+    use crate::http::body::empty;
 
     use super::*;
     

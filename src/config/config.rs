@@ -21,7 +21,8 @@ pub struct Server{
 #[derive(Debug, Deserialize, Clone)]
 pub struct Location {
     pub path: String,
-    pub proxy_pass: SocketAddr,
+    pub proxy_pass: Option<SocketAddr>,
+    pub root: Option<String>,
 }
 
 
@@ -30,6 +31,7 @@ pub fn load_config() -> Result<ProxyConfig, Box<dyn std::error::Error>> {
     let filename = "rustyx.toml";
 
     let contents = fs::read_to_string(filename)?;
+    
 
     let config: ProxyConfig = toml::from_str(&contents)?;
     

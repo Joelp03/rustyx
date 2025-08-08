@@ -1,7 +1,6 @@
 use std::net::SocketAddr;
 
-use http_body_util::{BodyExt, Empty, combinators::BoxBody};
-use hyper::{ body::Bytes, header::{self, HeaderValue}, Request};
+use hyper::{ header::{self, HeaderValue}, Request};
 
 
 pub struct ProxyRequest<T> {
@@ -9,12 +8,6 @@ pub struct ProxyRequest<T> {
     pub client_addr: SocketAddr,
     pub proxy_addr: SocketAddr,
 }
-pub fn empty() -> BoxBody<Bytes, hyper::Error> {
-        Empty::<Bytes>::new()
-            .map_err(|never| match never {})
-            .boxed()
-}
-
 
 impl<T> ProxyRequest<T> {
 
@@ -60,8 +53,11 @@ impl<T> ProxyRequest<T> {
 // --- Sección de pruebas ---
 #[cfg(test)]
 mod tests {
+    use crate::http::body::empty;
+
     use super::*;
-    use hyper::{header::HeaderValue, };
+    use http_body_util::combinators::BoxBody;
+    use hyper::{body::Bytes, header::HeaderValue };
 
 
 
