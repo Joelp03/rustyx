@@ -1,19 +1,16 @@
 use std::{net::SocketAddr, sync::Arc};
 
 use futures::future::BoxFuture;
-use http_body_util::{BodyExt, Full, combinators::BoxBody};
+use http_body_util::{BodyExt, combinators::BoxBody};
 use hyper::{
-    Method, Request, Response, Uri,
-    body::{Bytes, Incoming},
-    service::Service,
-    upgrade::Upgraded,
+    body::{Bytes, Incoming}, service::Service, upgrade::Upgraded, Method, Request, Response, Uri
 };
 use hyper_util::rt::TokioIo;
 use tokio::net::TcpStream;
 
 use crate::{
-    config::config, handlers::serve_file::server_static, http::{
-        body::{empty, full}, request::ProxyRequest, response::ProxyResponse
+    config::config, handlers::serve_file::serve_static, http::{
+        body::{empty, full, not_found}, request::ProxyRequest, response::ProxyResponse
     }
 };
 
@@ -45,87 +42,70 @@ pub struct ProxyService {
     pub config_server: Arc<config::Server>,
 }
 
+impl ProxyService {
+    fn find_matching_location(&self, path: &str) -> Option<&config::Location> {
+        self.config_server
+            .locations
+            .iter()
+            .filter(|location| path.starts_with(&location.path))
+            .max_by_key(|location| location.path.len())
+    }
+
+    fn handle_location_request(
+        &self,
+        req: Request<Incoming>,
+        location: &config::Location,
+    ) -> BoxFuture<'static, Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error>> {
+        if let Some(root_dir) = &location.root {
+            return self.handle_static_files(req, root_dir.clone());
+        }
+
+        if let Some(proxy_target) = &location.proxy_pass {
+            return self.handle_proxy_request(req, proxy_target.clone());
+        }
+
+        Box::pin(async { Ok(not_found()) })
+    }
+
+    fn handle_static_files(
+        &self,
+        req: Request<Incoming>,
+        root_dir: String,
+    ) -> BoxFuture<'static, Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error>> {
+        Box::pin(async move { 
+            serve_static(req, &root_dir).await 
+        })
+    }
+
+    fn handle_proxy_request(
+        &self,
+        req: Request<Incoming>,
+        proxy_target: SocketAddr,
+    ) -> BoxFuture<'static, Result<Response<BoxBody<Bytes, hyper::Error>>, hyper::Error>> {
+        let proxy_request = ProxyRequest::new(req, self.client_addr, self.proxy_addr);
+        Box::pin(proxy(proxy_request, proxy_target))
+    }
+
+}
+
+
 impl Service<Request<Incoming>> for ProxyService {
     type Error = hyper::Error;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
     type Response = Response<BoxBody<Bytes, hyper::Error>>;
 
     fn call(&self, req: Request<Incoming>) -> Self::Future {
-        /// Finds the most specific server location match for a given path.
-        ///
-        /// This function iterates over the `locations` configured for the server and finds the location
-        /// whose path is the longest prefix of the given `path`. It returns the `SocketAddr` for the
-        /// matched location, which indicates where to proxy requests for this path.
-        ///
-        /// # Arguments
-        ///
-        /// * `config_server` - A reference to the server configuration, which includes a list of locations.
-        /// * `path` - The URI path to match against the server's locations.
-        ///
-        /// # Returns
-        ///
-        /// An `Option<SocketAddr>` containing the address to proxy requests to if a match is found,
-        /// or `None` if no match is found for the `path`.
-
-        // fn match_server(config_server: &config::Server, path: &str) -> Option<SocketAddr> {
-        //     config_server
-        //         .locations
-        //         .iter()
-        //         .filter(|loc| path.starts_with(&loc.path))
-        //         .max_by_key(|loc| loc.path.len())
-        //         .map(|loc| loc.proxy_pass)
-        // }
-
-        fn match_location<'a>(
-            config_server: &'a config::Server,
-            path: &str,
-        ) -> Option<&'a config::Location> {
-            config_server
-                .locations
-                .iter()
-                .filter(|loc| path.starts_with(&loc.path))
-                .max_by_key(|loc| loc.path.len())
+        let request_path = req.uri().path();
+        
+        match self.find_matching_location(request_path) {
+            Some(location) => self.handle_location_request(req, location),
+            None => Box::pin(async { Ok(not_found()) }),
         }
-
-        let location = match match_location(&self.config_server, &req.uri().to_string()) {
-            Some(loc) => loc,
-            None => {
-                let mut resp = Response::new(full("Not found"));
-                *resp.status_mut() = hyper::StatusCode::NOT_FOUND;
-                return Box::pin(async move { Ok(resp) });
-            }
-        };
-
-        if let Some(root) = &location.root {
-            let root_dir = root.clone();
-            return Box::pin(async move {
-                server_static(req, &root_dir).await
-            });
-        }
-
-        if let Some(proxy_pass) = &location.proxy_pass {
-            let request = ProxyRequest::new(req, self.client_addr, self.proxy_addr);
-            return Box::pin(proxy(request, proxy_pass.clone()));
-        }
-
-        let mut resp = Response::new(full("Not found"));
-        *resp.status_mut() = hyper::StatusCode::NOT_FOUND;
-        return Box::pin(async move { Ok(resp) });
-
-        //  let proxy_pass = match match_server(&self.config_server, &req.uri().to_string()) {
-        //     Some(url) => url,
-        //     None => {
-        //         let mut resp = Response::new(full("Not found"));
-        //         *resp.status_mut() = hyper::StatusCode::NOT_FOUND;
-        //         return Box::pin(async move { Ok(resp) });
-        //     }
-        // };
-
-        // let request = ProxyRequest::new(req, self.client_addr, self.proxy_addr);
-
-        // Box::pin(proxy(request, proxy_pass.clone()))
     }
 }
+
+
+
 
 pub async fn proxy(
     req: ProxyRequest<Incoming>,
