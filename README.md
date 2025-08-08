@@ -22,7 +22,7 @@ Rustyx is a minimal reverse proxy written in Rust, inspired by NGINX. It routes 
 ### Build from source
 
 ```bash
-git clone <repository-url>
+git clone git@github.com:Joelp03/rustyx.git
 cd rustyx
 cargo build --release
 ```
@@ -52,9 +52,10 @@ proxy_pass = "127.0.0.1:9001"
 listen = ["127.0.0.1:8080", "0.0.0.0:8080"]
 name = "public"
 
+# static files
 [[server.location]]
-path = "/app"
-proxy_pass = "127.0.0.1:3000"
+path = "/"
+root = "/home/joel/Documents/Development/projects/Rustyx/public"
 ```
 
 ### Configuration Options
@@ -108,19 +109,32 @@ The proxy uses longest-prefix matching for path routing. For example:
 ### Project Structure
 
 ```
-src/
-├── main.rs           # Application entry point
-├── rustyx.rs         # Master server orchestrator
-├── config/           # Configuration management
-│   ├── mod.rs
-│   └── config.rs
-├── handlers/         # Request handlers
-│   ├── mod.rs
-│   └── proxy.rs      # Proxy service implementation
-└── http/             # HTTP utilities
-    ├── mod.rs
-    ├── request.rs
-    └── response.rs
+Rustyx/
+├── Cargo.toml              # Project dependencies and metadata
+├── Cargo.lock              # Dependency lock file
+├── README.md               # Project documentation
+├── rustyx.toml             # Proxy server configuration
+├── .gitignore              # Git ignore rules
+│
+├── src/                    # Source code
+│   ├── main.rs             # Application entry point with graceful shutdown
+│   ├── rustyx.rs           # Master server orchestrator
+│   │
+│   ├── config/             # Configuration management
+│   │   ├── mod.rs          # Module exports
+│   │   └── config.rs       # TOML config parsing and structures
+│   │
+│   ├── handlers/           # Request handlers
+│   │   ├── mod.rs          # Module exports
+│   │   ├── proxy.rs        # Refactored proxy service with routing
+│   │   └── serve_file.rs   # Enhanced static file server with security
+│   │
+│   └── http/               # HTTP utilities and abstractions
+│       ├── mod.rs          # Module exports
+│       ├── body.rs         # HTTP body utilities (full, empty, not_found)
+│       ├── request.rs      # Proxy request wrapper
+│       └── response.rs     # Proxy response wrapper
+│
 ```
 
 ### Dependencies
